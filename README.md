@@ -1,3 +1,5 @@
+Dieses Projekt habe ich im Rahmen des Moduls "Einführung in die Wahrscheinlichkeitstheorie und Statistik" mit meinen Kommilitonen Adrian Hayler und Fabio Neugebauer erarbeitet und hier vom TUM internen GitlabLRZ importiert.
+
 
 **Der Datensatz**
 

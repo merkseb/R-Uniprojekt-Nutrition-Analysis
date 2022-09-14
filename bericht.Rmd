@@ -1,0 +1,548 @@
+---
+title: "Bericht"
+output: pdf_document
+---
+
+
+```{r setup, include=FALSE}
+library(Rmisc)
+library(tidyverse)
+library(moments)
+# let's start up by setting up our data and important functions
+data_raw <- read_csv(file.path("data", "data_fabio.csv"))
+
+enhanced_division <- function(dividend, divisor) {
+  ifelse(divisor==0, 0, dividend/divisor)
+}
+
+trim_q <- function(x, lb, ub, trim_zero=FALSE){
+  x[(x != 0 | !trim_zero) & (x >= quantile(x, lb)) & (x <= quantile(x, ub))]
+}
+
+# prepare the data
+rows_without_na <- data_raw %>% 
+  filter(
+    across(
+      .cols = everything(),
+      .fns = ~ !is.na(.x)
+    )
+  )
+
+data <- rows_without_na
+data <- filter(data, !(calories < 0 | carbs < 0 | cholest < 0 | sodium < 0 
+               | sugars < 0 | fiber < 0))
+data <- data[(data$calories <= quantile(data$calories, 0.999)) & 
+               (data$carbs <= quantile(data$carbs, 0.999)) & 
+               (data$fat <= quantile(data$fat, 0.999)) & 
+               (data$protein <= quantile(data$protein, 0.999)) & 
+               (data$cholest <= quantile(data$cholest, 0.999)) & 
+               (data$sodium <= quantile(data$sodium, 0.999)) & 
+               (data$sugars <= quantile(data$sugars, 0.999)) & 
+               (data$fiber <= quantile(data$fiber, 0.999)),]
+
+#sorting of meals for 2.2
+data <- mutate(data,meal = replace(meal, grepl(paste(c("lunch","mittagessen","1300","13:00","supper","souper","middag","mid day","3rd meals","4th meals","lunsj","meal #3","meal #4","meal (2)"), collapse="|"), data$meal,ignore.case = TRUE), "lunch")) 
+data <- mutate(data,meal = replace(meal, grepl(paste(c("workout", "work out", "supplements","shake","suppliments","pre","post"), collapse="|"), data$meal,ignore.case = TRUE), "workout"))
+data <- mutate(data,meal = replace(meal, grepl(paste(c("dinner","diner","7pm-9pm","abendessen","18:00","deserts","dessert","5th meals","6th meals","meal #5","meal #6","meal (3)"), collapse="|"), data$meal,ignore.case = TRUE), "dinner")) 
+data <- mutate(data,meal = replace(meal, grepl("snack", data$meal,ignore.case = TRUE), "snacks")) 
+data <- mutate(data,meal = replace(meal, grepl(paste(c("frühstück","breakfast","b-fast","breakast","morning","break","déjeuner","08:00","0900","7am","frikost","brunch","1st break","1st meals","2nd meals","meal #1","meal #2","meal (1)"), collapse="|"), data$meal,ignore.case = TRUE), "breakfast")) 
+data <- mutate(data,meal = replace(meal, grepl(paste(c("20:30","bedtime","bed time","night","2000","nattmat"), collapse="|"), data$meal,ignore.case = TRUE), "night"))
+data <- mutate(data,meal = replace(meal, !grepl(paste(c("breakfast","lunch","dinner","snacks","workout","night"), collapse="|"), data$meal,ignore.case = TRUE), "all day"))
+
+# relative data for 2.3.2
+data_rel <- filter(data, calories != 0)
+data_rel$carbs_per_calorie <- data_rel$carbs / data_rel$calories
+data_rel$fat_per_calorie <- data_rel$fat / data_rel$calories
+data_rel$protein_per_calorie <- data_rel$protein / data_rel$calories
+data_rel$sugars_per_calorie <- data_rel$sugars / data_rel$calories
+data_rel$cholest_per_calorie <- data_rel$cholest / data_rel$calories
+data_rel$sodium_per_calorie <- data_rel$sodium / data_rel$calories
+data_rel$fiber_per_calorie <- data_rel$fiber / data_rel$calories
+
+data_rel <- data_rel[
+  (data_rel$carbs_per_calorie <= quantile(data_rel$carbs_per_calorie, 0.999)) & 
+  (data_rel$fat_per_calorie <= quantile(data_rel$fat_per_calorie, 0.999)) & 
+  (data_rel$protein_per_calorie <= quantile(data_rel$protein_per_calorie, 0.999)) & 
+  (data_rel$sugars_per_calorie <= quantile(data_rel$sugars_per_calorie, 0.999)) & 
+  (data_rel$cholest_per_calorie <= quantile(data_rel$cholest_per_calorie, 0.999)) & 
+  (data_rel$sodium_per_calorie <= quantile(data_rel$sodium_per_calorie, 0.999)) & 
+  (data_rel$sugars_per_calorie <= quantile(data_rel$sugars_per_calorie, 0.999)) & 
+  (data_rel$fiber_per_calorie <= quantile(data_rel$fiber_per_calorie, 0.999)),]
+
+
+#die daten zu fast food
+data_fast_food <- mutate(data_rel,name = replace(name, grepl(paste(c("McDonalds","mcdonalds","Mcdonald","mcDonalds","Mcdonalds","mcDonald","mcdonald","McDonald", "Mc Donalds", "mc Donalds", "mc donalds", "Mc donalds", "Mc Donald", "Mc donald", "Mc Donald's", "McDonald's", "Mcdonald's", "McDonald's"), collapse="|"), data_rel$name,ignore.case = TRUE), "McDonalds"))
+
+data_fast_food <- mutate(data_fast_food,name = replace(name, grepl(paste(c("TacoBell", "Taco Bell", "Taco bell", "taco bell", "Tacobell", "tacobell", "Taco Bel", "Taco Bell's", "Tacobel", "tacobel"), collapse="|"), data_fast_food$name,ignore.case = TRUE), "TacoBell"))
+
+data_fast_food <- mutate(data_fast_food,name = replace(name, grepl(paste(c("Burger King", "Burgerking", "burgerking", "Burger king", "burger king", "burger King"), collapse="|"), data_fast_food$name,ignore.case = TRUE), "Burger King"))
+
+data_fast_food <- mutate(data_fast_food,name = replace(name, grepl(paste(c("Kfc", "KFC", "kFc", "Kentucky Fried Chicken", "kfC", "kFC", "KFc"), collapse="|"), data_fast_food$name,ignore.case = TRUE), "Kfc"))
+
+data_fast_food <- mutate(data_fast_food,name = replace(name, grepl(paste(c("Wendy's", "Wendys", "wendy's", "Wendy'", "Wendy''s", "Wendys", "WENDY", "wendy", "Wendy"), collapse="|"), data_fast_food$name,ignore.case = TRUE), "Wendy's"))
+
+data_fast_food <- mutate(data_fast_food,name = replace(name, grepl(paste(c("Subway", "subway", "Sub Way", "sub way'", "Sub way", "SUBWAY"), collapse="|"), data_fast_food$name,ignore.case = TRUE), "Subway"))
+
+fast_foods <- c("McDonalds","TacoBell", "Burger King", "Kfc", "Wendy's", "Subway")
+
+data_fast_food <- data_fast_food %>% filter(name %in% fast_foods)
+data_male <- data_rel %>% filter(gender == "m") %>% group_by(username,date) %>% summarise(total = mean(sugars_per_calorie)) %>% summarise(mean = mean(total))
+data_female <- data_rel %>% filter(gender == "f") %>% group_by(username,date) %>% summarise(total = mean(sugars_per_calorie)) %>% summarise(mean = mean(total))
+
+#set color
+c_2 <- "#005293"
+c_1 <- "#0065BD"
+c_mult <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+
+# R_Projekt_AFS
+
+# 1. Einleitung
+
+## 1.1. Der Datensatz
+
+### 1.1.1. Ursprung
+
+Der Datensatz ist im Rahmen einer Masterarbeit von Gregor Ziegeltrum entstanden. Hierfür wurde öffentlich verfügbare Daten von der Website www.myfitnesspal.com via Web Scraping extrahiert. Gregor Ziegeltrum hat uns ein Teil dieses Datensatzes für unser R-Projekt bereitgestellt.
+
+### 1.1.2. Inhalt
+
+Kurz gesagt: Der Datensatz enthält das Essverhalten von  221 Personen in Form von ca. 1 Millionen Beobachtungen.
+Im Detail stellt eine Beobachtung (Zeile), jeweils ein Lebensmittel, welches die jeweilige Person verzerrt hat, dar. Wir finden pro Beobachtung die folgenden Spalten vor:
+
+- __username__: Der Username der Person z.B. "Stephan85" - ein String, der bei ca. 221 Personen als kategorial angenommen werden kann
+- __gender__: Das Geschlecht der Person: "m" oder "f" - Eine kategorische Variabel mit genau 2 Optionen
+- __location__: Der Ort, in dem die jeweilige Person wohnt, z.B. "Mount Airy, MD" - ein String, der bei ca. 140 verschiedenen Orten als kategorial angenommen werden kann.
+- __joined_date__: Das Datum, an dem die jeweilige Person ihren Account auf www.myfitnesspal.de erstellt hat, z.B. "16-05-13" - ein String, der Form DD-MM-YY.
+- __age__: Das Alter der Person z.B. 43 - ein Integer.
+- __meal_date__: Das Datum, an dem die Person das jeweilige Lebensmittel verzerrt hat, z.B. "12-02-13" -  ein String, der Form DD-MM-YY.
+- __meal__: Die Mahlzeit, zu der das jeweilige Lebensmittel verzerrt; Standartoptionen sind "breakfast", "lunch", "dinner" und "snacks", allerdings sind auch benutzerdefinierte Eingaben möglich wie "11am - 1pm" - ein String
+- __name__: Der Name (inkl. Mengenangabe) des verzerrten Lebensmittels z.B. "Pace - Medium Chunky Salsa, 20 tbsp" - ein String.
+- __calories__: Die Kalorien (in Kilokalorien), welche die jeweilige Portion des Lebensmittels enthält, z.B. 100 - ein Integer.
+- __carbs(g)__: Die Menge an Kohlenhydraten (in Gramm), welche die jeweilige Portion enthält z.B. 105 - ein Integer.
+- __fat(g)__: Die Menge an Fett (in Gramm), welche die jeweilige Portion enthält - ein Integer.
+- __protein(g)__: Die Menge an Protein (in Gramm), welche die jeweilige Portion enthält - ein Integer.
+- __cholest(mg)__: Die Menge an Cholesterin (in Milligramm), welche die jeweilige Portion enthält - ein Integer.
+- __sodium(mg)__: Die Menge an Salz (in Milligramm), welche die jeweilige Portion enthält - ein Integer.
+- __sugars(g)__: Die Menge an Zucker (in Gramm), welche die jeweilige Portion enthält - ein Integer.
+- __fiber(g)__: Die Menge an Ballaststoffe (in Gram), welche die jeweilige Portion enthält - ein Integer.
+
+__Hinweis__: Die Nährwertangaben sind hier pro angegebene Portion und nicht pro 100 Gramm.
+
+## 1.2 Fragestellungen
+
+Folgende Fragestellungen hoffen wir mit Hilfe des Datensatzes zu beantworten:
+
+- Haben Frauen einen sogenannten Sweet Tooth, genauer, gibt es einen Zusammenhang von Gender und
+Zuckerkonsum?
+- Bei welcher Fast-Food-Kette ist die durchschnittliche Mahlzeit am gesündesten/ungesündesten?
+
+Sekundär stellt sich dann natürlich die Frage, was überhaupt eine Mahlzeit gesund oder ungesund gemacht.
+
+
+# 2. Explorative Datenanalyse
+
+## 2.1 Vorbereitung
+
+Da der Datensatz von Nutzern generiert wurde und dann durch Web Scraping extrahiert wurde, ist er natürlich nicht perfekt. Deshalb müssen ein paar Säuberungen durchgeführt werden. Die Wichtigsten sind hier zusammengefasst:
+
+- __Beobachtungen mit 'NA' als eine der Nährwerte__: Dies sind ca. 20-30 % der Beobachtungen und stammen in so gut wie jeden Fall daher, dass ein Nutzer zu faul war, eine Null für z.B. Fett einzutragen. Da wir allerdings genügen Beobachtungen haben (ca. 1 Million), lassen wir diese Beobachtungen trotzdem einfach weg.
+- __Beobachtungen mit negativen Nährwerten__: Diese sind Tippfehler oder "Korrekturrechnungen" einiger Nutzer und werden natürlich weggelassen (allerdings sind das nur ca. 200 Beobachtungen).
+- __Beobachtungen mit zu hohen Nährwerten__: Tippfehler und Korrekturrechnungen gehen leider auch in die andere Richtung (wie wäre es mit einer Mahlzeit mit 20000 Kalorien?). Hierfür entfernen wir die 0,1 % größten Beobachtungen pro Nährwert (Kalorien, Kohlenhydrate, Salz, Fett etc.).
+- __Eintragungen mit personalisierten Mahlzeiten__: Den Nutzern war es möglich sich eigene Namen für ihre Mahlzeiten zu erstellen. Das macht es schwer die Variable meal zu untersuchen, weshalb wir Einträge jeweils mit passender Zuordnung in die Mahlzeiten "breakfast", "lunch", "dinner", "night", "workout", "snacks" und "all day" unterteilen. "all day" enthält hier alle restlichen schwer zuweißbaren Einträge.
+
+## 2.2. Kategoriale Variablen
+
+Als kategoriale Variablen möchten wir im Folgenden meal, date, age, gender und location betrachten. Die Einträge username und joined-date lassen wir aus Datenschutzgründen außen vor. Die Variable name sticht durch die Menge an unterschiedlichen Einträgen hervor, wir werden sie deshalb gesondert in Abschnitt 4 im Bezug auf Fast-Food Ketten betrachten.
+Zunächst einige exemplarische Übersichten der Nährstoffanteile unterschiedlicher Mahlzeiten.
+In diesem Abschnitt ist grundsätzlich eine Diskrepanz zwischen bekannten Durchschnittsnährwerten und den hier errechneten Daten zu erkennen. Man kann davon ausgehen, dass der Unterschied zwischen dem zu erwartenden Gesamtkonsum an Kalorien ( oder anderen Inhaltsstoffen) pro Tag und den hier dargestellten Daten auf die Inkonsequenz der Nutzer zurück zu führen ist. Die Verteilung ist trotzdem aussagekräftig, da man von einem tagesunahängigen Verhalten der Probanden ausgehen kann. Eine Betrachtung von Absolutwerten ist also weniger sinnvoll, als eine relative Darstellung und die Analyse der Verteilung.
+
+### 2.2.1 Meal
+
+```{r, out.width="33%", echo=FALSE, message = FALSE}
+p_meal_cal <- data %>% filter(meal != "all day") %>%  group_by(meal,username,date) %>% summarise(total = sum(calories)) %>% summarise(mean_user = mean(total))%>% summarise(mean_cal = mean(mean_user)) %>% ggplot(aes(x = meal, y = mean_cal,fill=meal)) + geom_col()+ ylab("mean calories (in kcal)")+ scale_fill_manual( values = c_mult)
+p_meal_sugar <- data %>% filter(meal != "all day") %>%  group_by(meal,username,date) %>% summarise(total = sum(sugars)) %>% summarise(mean_user = mean(total))%>% summarise(mean_sugar = mean(mean_user)) %>% ggplot(aes(x = meal, y = mean_sugar,fill=meal)) + geom_col()+ ylab("mean sugar (in g)")+ scale_fill_manual( values = c_mult)
+p_meal_fat <- data %>% filter(meal != "all day") %>%  group_by(meal,username,date) %>% summarise(total = sum(fat)) %>% summarise(mean_user = mean(total))%>% summarise(mean_fat = mean(mean_user)) %>% ggplot(aes(x = meal, y = mean_fat,fill=meal)) + geom_col()+ ylab("mean fat (in g)") + scale_fill_manual( values = c_mult)
+plot(p_meal_cal)
+plot(p_meal_sugar)
+plot(p_meal_fat)
+
+```
+
+Es lassen sich also durchaus Unterschiede in den Nährstoffzusammensetzungen einzelner Mahlzeiten identifizieren. Im Vergleich zu der Übersicht der Kalorien fällt bei der Betrachtung der Zuckeranteile auf, dass Frühstück, Workout und insbesondere Snacks überproportinal viel Zucker enthalten. Ein Workout enthält dafür besonders wenig Fett. 
+
+
+### 2.2.2 Date
+
+Wir möchten nun die Unterschiede in der Nahrungsaufnahme innerhalb eines Jahres betrachten, hier exemplarisch das Jahr 2019.
+```{r, out.width="33%", echo=FALSE, message = FALSE,warning=FALSE}
+data_19 <- data %>% filter(grepl("-19",data$date))
+data_19$date <- as.Date(data_19$date, format = "%d-%m-%y")
+p_19_cal <- data_19%>% group_by(date) %>%  summarise(mean_cal = sum(calories)/n_distinct(username)) %>%  ggplot(aes(x = date ,y = mean_cal ),color = c_1) + ylim(500,1500) +geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"))+ ylab("mean calories (in kcal)")
+p_19_sugars <- data_19%>% group_by(date) %>%  summarise(mean_sugar = sum(sugars)/n_distinct(username)) %>%  ggplot(aes(x = date ,y = mean_sugar ),color = c_1) + ylim(20,50) +geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"))
+p_19_fat <- data_19%>% group_by(date) %>%  summarise(mean_fat = sum(fat)/n_distinct(username)) %>%  ggplot(aes(x = date ,y = mean_fat ),color = c_1) + ylim(30,50) +geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"))+ ylab("mean fat (in g)")
+plot(p_19_cal)
+plot(p_19_sugars)
+plot(p_19_fat)
+```
+
+Zu erkennen ist ein zeitweises Hoch im Oktober bei allen drei Angaben und ein anschließendes Abfallen zum Ende Jahres bei Kalorien und Zucker. Gesamttendenz ist in allen drei Fällen fallend, trotzdem kann man grundsätzlich von einer Gleichverteilung sprechen.
+
+### 2.2.3 Age
+
+Wir möchten nun das Essverhalten nach Alter gegliedert, anhand einiger exemplarischer Nährwerte, darstellen.
+
+```{r, out.width="25%", echo=FALSE, message = FALSE,warning=FALSE}
+p_age_cal <- data %>% group_by(age,username,date) %>% summarise(tot_cal = sum(calories)) %>% summarise(total_cal = mean(tot_cal))%>% summarise(mean_cal = mean(total_cal)) %>% ggplot(aes(x = age, y = mean_cal),color = c_1) + geom_smooth()+ ylab("mean calories (in kcal)")
+
+p_age_pro <- data %>% group_by(age,username,date) %>% summarise(tot_pro = sum(protein)) %>% summarise(total_pro = mean(tot_pro)) %>% summarise(mean_pro = mean(total_pro)) %>% ggplot(aes(x = age, y = mean_pro),color = c_1) + geom_smooth()+ ylab("mean protein (in g)")
+
+p_age_carbs <- data %>% group_by(age,username,date) %>% summarise(tot_carbs = sum(carbs)) %>% summarise(total_carbs = mean(tot_carbs)) %>% summarise(mean_carbs = mean(total_carbs)) %>% ggplot(aes(x = age, y = mean_carbs),color = c_1) + geom_smooth()+ ylab("mean carbs (in g)")
+
+p_age_fat <- data %>% group_by(age,username,date) %>% summarise(tot_fat = sum(fat)) %>% summarise(total_fat = mean(tot_fat)) %>% summarise(mean_fat = mean(total_fat)) %>% ggplot(aes(x = age, y = mean_fat),color = c_1) + geom_smooth() + ylab("mean fat (in g)")
+
+plot(p_age_cal)
+plot(p_age_carbs)
+plot(p_age_fat)
+plot(p_age_pro)
+```
+
+Man beobachtet zwei deutliche Peaks bei 35-40 und 60-65 Jahren für Kalorien und Fett, die bei Kohlenhydraten und Protein nicht bis deutlich abgeschwächt zu sehen sind. Kohlenhydrate und Protein weisen einen fast linearen Abfall auf, während die Werte, Kalorien und Fett, sowohl für jüngere als auch für ältere Menschen niedriger sind.
+
+### 2.2.4 Gender
+
+Wir möchten nun auch die Unterschiede im Konsumverhalten von Männer und Frauen beleuchten.
+
+```{r, out.width="33%", echo=FALSE, message = FALSE,warning=FALSE}
+data_gender <- data %>% select(date,username,gender,calories,carbs,fat,sugars,protein,cholest,sodium,fiber) %>% gather("nutriants","values",4:11) %>% group_by(gender,nutriants,username,date) %>% summarise(sum = sum(values)) %>% summarise(mean = mean(sum)) %>% summarise(mean_nutr = mean(mean))
+
+p_gender_a <- data_gender %>% filter(nutriants == "calories") %>% ggplot(aes(nutriants, fill = gender, y = mean_nutr)) +
+  geom_col(position = "dodge") + ylab("mean calories (in kcal)") + scale_fill_manual( values = c("#E37222",c_1))
+p_gender_b <- data_gender %>% filter(nutriants %in% c("sugars","fat","protein","carbs","fiber")) %>% ggplot(aes(nutriants, fill = gender, y = mean_nutr)) +
+  geom_col(position = "dodge") + ylab("mean nutriants (in g)")+ scale_fill_manual( values = c("#E37222",c_1))
+p_gender_c <- data_gender %>% filter(nutriants %in% c("sodium","cholest")) %>% ggplot(aes(nutriants, fill = gender, y = mean_nutr)) +
+  geom_col(position = "dodge") + ylab("mean nutriants (in mg)")+ scale_fill_manual( values = c("#E37222",c_1))
+plot(p_gender_a)
+plot(p_gender_b)
+plot(p_gender_c)
+
+```
+
+Es ist sowohl für Kalorien, als auch für alle Nährstoffe außer Cholesterin und Ballaststoffen ist ein deutlich höherer Wert bei Männern zu erkennen. Der höchste prozentuale Unterschied ist bei Protein und Fett zusehen, wo Männer 25% bzw. 20% mehr zu sich nehmen.
+
+### 2.2.5 Location
+
+Nun möchten wir noch den Wohnort der Nutzer als Faktor für Unterschiede im Essverhalten untersuchen. Bei rund 220 Nutzern in den USA ist eine Einteilung in States oder sogar Städte wenig repräsentativ, weshalb wir stattdessen in dieser Betrachtung nur nach Red- und Blue-States trennen, also nach den Wahlentscheidungen der letzten Präsidentschaftswahl.
+
+```{r, out.width="33%", echo=FALSE, message = FALSE,warning=FALSE}
+red <- c("AL","AK","AR","FL","ID","IN","IA","KS","KY","LA","MS","MO","MT","NE","NC","ND","OH","OK","SC","SD","TN","TX","UT","WV","WY")
+
+
+data <- data %>% mutate(party = !grepl(paste(red,collapse="|"),data$location))
+
+data_state <- data %>% select(date,username,party,calories,carbs,fat,sugars,protein,cholest,sodium,fiber) %>% gather("nutriants","values",4:11) %>% group_by(party,nutriants,username,date) %>% summarise(sum = sum(values)) %>% summarise(mean = mean(sum)) %>% summarise(mean_nutr = mean(mean))
+p_state_a <- data_state %>% filter(nutriants == "calories") %>% ggplot(aes(nutriants, fill = party, y = mean_nutr)) +
+  geom_col(position = "dodge",show.legend = FALSE) + ylab("mean calories (in kcal)")+ scale_fill_manual(values =c("#930009",c_2))
+p_state_b <- data_state %>% filter(nutriants %in% c("sugars","fat","protein","carbs","fiber")) %>% ggplot(aes(nutriants, fill = party, y = mean_nutr)) +
+  geom_col(position = "dodge",show.legend = FALSE) + ylab("mean nutriants (in g)")+ scale_fill_manual(values =c("#930009",c_2))
+p_state_c <- data_state %>% filter(nutriants %in% c("sodium","cholest")) %>% ggplot(aes(nutriants, fill = party, y = mean_nutr)) +
+  geom_col(position = "dodge",show.legend = FALSE) + ylab("mean nutriants (in mg)") + scale_fill_manual(values = c("#930009",c_2))
+plot(p_state_a)
+plot(p_state_b)
+plot(p_state_c)
+
+```
+
+Hier entspricht der rote Balken den Republikanern und der blaue Balken den Demokraten. Zu erkennen ist, dass Wähler beider Parteien etwa gleich viele Kalorien zu sich nehmen. Demokraten tendieren dabei deutlich eher zu Kohlenhydraten bzw. Zucker, während Republikaner mehr Fett und Protein konsumieren.
+
+
+## 2.3. Kontinuierliche Variablen
+
+### 2.3.1. Ein Überblick
+
+Bei den kontinuierlichen Variablen (unseren Nährwerten) verschaffen wir uns einen Überblick, indem wir die jeweiligen Verteilungen als Histogramme darstellen.  
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_carbs <- ggplot(data, aes(x = carbs)) + geom_histogram(bins = 40,fill = c_1)
+p_calories <- ggplot(data, aes(x = calories)) + geom_histogram(bins = 40,fill = c_1)
+plot(p_calories)
+plot(p_carbs)
+```
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_fat <- ggplot(data, aes(x = fat)) + geom_histogram(bins = 40,fill = c_1)
+p_protein <- ggplot(data, aes(x = protein)) + geom_histogram(bins = 40,fill = c_1)
+plot(p_fat)
+plot(p_protein)
+```
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_sugars <- ggplot(data, aes(x = sugars)) + geom_histogram(bins = 40,fill=c_1)
+p_fiber <- ggplot(data, aes(x = fiber)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_sugars)
+plot(p_fiber)
+```
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_cholest <- ggplot(data, aes(x = cholest)) + geom_histogram(bins = 40,fill=c_1)
+p_sodium <- ggplot(data, aes(x = sodium)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_cholest)
+plot(p_sodium)
+```
+
+Alle Histogramme sind durch ein Maximum bei 0 und ein daraufhin schnelles Abfallen charakterisiert. Wir wissen zwar jetzt, wie die jeweiligen Daten verteilt sind, aufgrund der stark variierenden Portionsgrößen können wir allerdings noch nicht sehen "wie salzig" oder "wie fettig" die verspeisten Lebensmittel waren. Damit werden wir uns jetzt beschäftigen.
+
+### 2.3.1 Relative Nährwerte
+
+Diesem Abschnitt liegt die folgende Überlegung zugrunde: Jeder Mensch ist pro Tag ungefähr die gleiche Menge an Kalorien. Der tägliche Konsum an Fett, Zucker, Salz und anderen Nährstoffen verteilt sich als auf diese konstante Menge an Kalorien. Möchten wir also herausfinden, wie "süß", "salzig" oder "fettig" eine Ernährung ist, so betrachten wir, wie viel Fett, Zucker oder Salz pro Kalorien zu sich genommen werden.
+
+Diese Methode ist natürlich auch nicht perfekt: Es gibt, wie wir in 2.3.1. gesehen haben, viele Beobachtungen, die keine Kalorien enthalten. Dies ist z.B. ein Teelöffel Salz ("Salt - Salt, 0.25 tsp(s)"), ungesüßter Tee ("Teas' Tea - Jasmine Green Tea (Unsweetened), 8 oz (240ml)") oder auch Fehler beim Eintragen (z.B. "Totinos - Party Pizza - Triple Pepperoni, 0 pizza"). Diese Beobachtungen filtern wir für die Bestimmung der relativen Nährwerte heraus.
+Zusätzlich entfernen wir wieder die 0,1 % größten Beobachtungen pro relativen Nährwert, um Tippfehlern entgegenzuwirken.
+
+Sonst werden die relativen Nährwerte einer Beobachtung einfach dadurch bestimmt, indem wir die Menge des Nährstoffes durch die Kalorien teilen. Wir plotten die Resultate wieder als Histogramme:
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_carbs <- ggplot(data_rel, aes(x = carbs_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_carbs)
+
+p_fat <- ggplot(data_rel, aes(x = fat_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_fat)
+```
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_protein <- ggplot(data_rel, aes(x = protein_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_protein)
+
+p_sugars <- ggplot(data_rel, aes(x = sugars_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_sugars)
+```
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_fiber <- ggplot(data_rel, aes(x = fiber_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_fiber)
+
+p_cholest <- ggplot(data_rel, aes(x = cholest_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_cholest)
+```
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_sodium <- ggplot(data_rel, aes(x = sodium_per_calorie)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_sodium)
+```
+
+Wieder haben alle Histogramme einen starken Ausschlag bei 0 gemeinsam, allerdings können wir nun auch feinere Unterschiede ablesen. So sind Kohlenhydrate und Fett außerhalb der 0 fast gleich verteilt (bis jeweils 0.25 bzw. 0.1 - dazu kommen wir gleich), während die bei den restlichen Nährstoffen wieder ein schnelles Abfallen zu beobachten ist. Es scheint also so, als würde sowohl kohlenhydrathaltige bzw. fettige als auch kohlenhydratarme bzw. fettfreie Lebensmittel auf dem Speiseplan stehen, während bei den anderen Nährstoffen die Häufigkeit mit der Konzentration stetig abnimmt.
+
+Wir können jetzt auch einen "Sanity-Check" auf unseren Daten durchführen. Die Kalorien, die ein Gramm Kohlenhydrate, Fett, Protein und Zucker enthält, sind bekannt. Dadurch ergibt sich für jeder dieser relativen Nährwerte eine natürliche Obergrenze (ein Lebensmittel kann maximal nur aus Fett oder nur aus Zucker bestehen):
+
+- __Kohlenhydrate:__ _"Carbohydrate consumed in food yields 3.87 kilocalories of energy per gram for simple sugars,[18] and 3.57 to 4.12 kilocalories per gram for complex carbohydrate in most other foods."_ (Quelle: https://en.wikipedia.org/wiki/Carbohydrate). Ein Gramm pure Kohlenhydrate hätten dann einen relativen Nährwert von maximal $1/3.5 \approx 0.29$.
+- __Zucker:__ Nach der obigen Quelle liegt die Obergrenze als bei $1/3.87 \approx 0.26$.
+- __Fett:__ _Each gram of fat when burned or metabolized releases about 9 food calories (37 kJ = 8.8 kcal)._ (Quelle: https://en.wikipedia.org/wiki/Fat). Die Obergrenze ergibt sich als $1/8.8 \approx 0.11$.
+- __Protein:__ _As a fuel, proteins provide as much energy density as carbohydrates: 4 kcal (17 kJ) per gram;"_ (Quelle: https://en.wikipedia.org/wiki/Protein_(nutrient) ). Wieder berechnen wir die Obergrenze als ungefähr $1/4 = 0.25$
+
+Ein kurzer Blick auf unsere Grafiken ergibt, dass sich die Obergrenzen genau mit unseren Daten decken.
+
+### 2.3.2. Gewichtete Histogramme
+
+Bis jetzt ging in jedem Histogramm jede Beobachtung mit dem gleichen Gewicht ein. Ist es allerdings wirklich sinnvoll, die eine Schokopraline mit dem Schweinebraten zum Mittagessen gleichzusetzen? Eine gute alternative wäre, dass jede Beobachtung nicht mit dem Gewicht 1, sondern der Anzahl seiner Kalorien mit eingeht. Dies ist eine einzigartige Möglichkeit des Datensatzes, da dieser ja das komplette Essverhalten von 220 Nutzern darstellt.
+
+Bei den Plots der absoluten Nährwerte (2.3.1) ist eine Gewichtung natürlich weniger sinnvoll. Wenn wir die Plots der relativen Nährwerte (2.3.2) gewichten, so können wir besser beurteilen, wie "salzig", "fettig" oder "süß" die durchschnittliche Kalorie ist.
+
+Hier also die Plots aus (2.3.2) gewichtet nach Kalorien:
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_carbs <- ggplot(data_rel, aes(x = carbs_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_carbs)
+
+p_fat <- ggplot(data_rel, aes(x = fat_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_fat)
+```
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_protein <- ggplot(data_rel, aes(x = protein_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_protein)
+
+p_sugars <- ggplot(data_rel, aes(x = sugars_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_sugars)
+```
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_fiber <- ggplot(data_rel, aes(x = fiber_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_fiber)
+
+p_cholest <- ggplot(data_rel, aes(x = cholest_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_cholest)
+```
+
+```{r, fig.show="hold", out.width="50%", echo=FALSE}
+p_sodium <- ggplot(data_rel, aes(x = sodium_per_calorie, weight=calories)) + geom_histogram(bins = 40,fill=c_1)
+plot(p_sodium)
+```
+
+Über alle Plots hinweg (allerdings ist der Effekt verschieden stark ausgeprägt) sieht man eine Abschwächung der Extrema (d.h. sowohl eine Abschwächung am linken als auch am rechten Rand). Besonders gut sieht man das bei den Proteinen: Die durchschnittliche Kalorie scheint zwar proteinarm zu sein, allerdings auch nicht "proteinfrei" zu sein.
+
+# 3. Methodik
+
+## 3.1. Konfidenzintervalle 
+
+Im Teil vier werden wir Konfidenzintervalle zum Konfidenzniveau 95%. Dazu nutzen wir die Berechnungsmethode, die im Vorlesungsskript auf Seite 176 im Kapitel Parameterschätzer hergeleitet wurde:
+$$C(x)=\left(\overline{x_n}-t_{n-1, \,97.5\%} \sqrt{\frac{s_n^2}{n}}, \overline{x_n}+t_{n-1, \,97.5\%} \sqrt{\frac{s_n^2}{n}} \right)$$.
+Dabei bezeichne $\overline{x_n}$ das empirische Mittel, $s_n^2$ die Stichprobenvarianz und $t_{n-1, \,97.5\%}$ die Quantilsfunktion der $t_{n-1}$-Verteilung ausgewertet bei $97.5\%$. 
+
+Dabei berechnet diese Methode die Konfidenzintervalle für den Erwartungswert einer Normalverteilung mit unbekannter Varianz bei $n$ unabhängigen Stichproben. Es bleibt also zu argumentieren, dass wir die Stichproben als Produktmodell von Normalverteilten Zufallsvariablen auffassen können
+
+### 3.1.1. Zur Unabhängigkeit und identischen Verteilung
+
+Wir wenden die Bereichsschätzer auf einzelne Gerichte bei einer festen Fast-Food Kette an und hier bei auf immer denselben Wert, wie z.B. Fett pro Kalorie. Wir wollen das Mittel von zum Beispiel Fett pro Kalorie einer durchsschnittlichen Mahlzeit aus allen verkauten Mahlzeiten bei einer festen Fast-Food Kette schätzen. Da wir annehmen in unserer Datenbank sind durchschnittlichen US-Bürger die ihre gegessenen Mahlzeiten gewissenhaft eintragen, ist auch die Annahme der Unabhängigkeit und identischen Verteilung der z.B Fett pro Kalorie Werte unterschiedlicher Mahlzeiten in unserer Datenbank bei einer festen Fast-Food Kette angebracht. 
+
+### 3.1.2. Zur approximativen Normalverteilung 
+
+Wir betrachten Normalquantilplots:
+
+```{r,out.width="50%", error=FALSE,message=FALSE,warning=FALSE}
+data_fast_food %>% filter(name == "TacoBell") %>%ggplot(aes(sample = sodium_per_calorie)) +
+  stat_qq(color = c_1) + stat_qq_line(color = c_2)
+data_fast_food %>% filter(name == "Wendy's") %>%ggplot(aes(sample = fat_per_calorie)) +
+  stat_qq(color = c_1) + stat_qq_line(color = c_2)
+
+```
+
+Hier haben wir einmal Salz pro Kalorie bei allen eingetragen Mahlzeiten von Taco Bell und einmal Fett pro Kalorie bei den Gerichten in unserer Datenbank, die bei Wendy's gekauft wurden in Normalquantilplot eingetragen. Die geringen Abweichungen von einer Gerade, bestätigen unsere Annahme, dass die Daten approximativ Normalverteilt sind. 
+ 
+
+## 3.2. Hypothesentest
+
+Wir möchten in Part 4 den Unterschied im Zuckerkonsum von Männern und Frauen betrachten und im Speziellen die Hypothese, dass Frauen am Tag im Schnitt mehr Zucker pro Kalorie essen, untersuchen. Dazu müssen wir zunächst einen Test wählen dessen Vorraussetzungen von unseren Daten erfüllt werden können. 
+
+Da wir insbesondere keine Gleichheit von Varianz in den Daten von Männern und Frauen annehmen können, möchten wir, statt dem aus der Vorlesung bekannten Zweistichproben-t-test, einen Welch-t-test verwenden.
+
+Donald W. Zimmermann schreibt "... the Welch test is superior to the t test when variances are unequal."[2]
+
+Dieser hat die die Teststatistik $$t=\frac{\overline{X}-\overline{Y}}{\sqrt{\frac{S_{X,n}^2}{n}+\frac{S_{Y,m}^2}{m}}}$$ hierbei bezeichnen $\overline{X},\overline{Y}$ empirische Mittel und $S_{X,n}^2,S_{Y,m}^2$ empirische Stichprobenvarianz zu $(x_1,\ldots,x_n)$ bzw. $(y_1,\ldots,y_m)$ [1].
+
+
+Vorraussetzungen die es für eine Anwendung zu überprüfen gilt sind die Unabhängigkeit der einzelnen Stichproben  und die (approximative-)Normalverteilung innerhalb einer Stichprobengruppe. 
+
+### 3.2.1. Zur Unabhängigkeit 
+
+Wir betrachten Mittelwerte des Konsums von Zucker pro Kalorie verschiedener Personen. Wir gehen davon aus, dass diese Personen sich nicht kennen und dadurch ihr Essverhalten nicht beeinflussen, damit erhalten wir also insbesondere Unabhängigkeit der Stichproben der errechneten Mittelwerte.
+
+
+### 3.2.2. Zur approximativen Normalverteilung
+
+Für die Anwendung des Welsh-t-Tests ist grundsätzlich vorrausgesetzt, dass die zu vergleichenden Stichprobengruppen jeweils normalverteilt sind, dies können wir zunächst nicht vorraussetzen. Wir betrachten zur Untersuchung zunächst Kolmogorov-Smirnov-Tests [3] auf Normalität
+
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+ks.test(data_male$mean,"pnorm",mean = mean(data_male$mean),
+        sd = sd(data_male$mean))
+ks.test(data_female$mean,"pnorm",mean = mean(data_female$mean),
+        sd = sd(data_female$mean))
+```
+
+
+Insbesondere erhalten wir mit Berry-Esseen, dass für größere Mengen an Beobachtungen unter der Annahme eines endlichen dritten Moments, für einen t-test gleiche Bedingungen wie unter Annahme von Normalität gelten [4].
+
+Die dritten Momente unserer Beobachtungsvektoren möchten wir nun noch schätzen
+
+```{r}
+moment(data_male$mean,3,absolut = TRUE,central = TRUE)
+
+moment(data_female$mean,3,absolut=TRUE,central = TRUE)
+```
+
+Wir wollen auf Grund dieser Beobachtungen in Zukunft von einer ungefähren Normalverteilung unserer Beobachtungsvektoren  ausgehen.
+
+# 4. Ergebnise und Schlussfolgerungen 
+
+## 4.1. Fast-Food 
+### 4.1.1. Fast-Food vs. Food 
+
+Wir vergleichen das Essen in unseren Datensatz, das mit dem Namen der Fast-Food-Ketten McDonalds, Taco Bell, Burger King, Wendy's und Subway gekennzeichnet wurde, sowie allgemeine Mahlzeiten in unserem Datensatz, mit dem empfohlenen Konsum in Gramm beziehungsweise Miligramm pro Kilokalorie. 
+
+Die Empfehlungswerte pro Kilokalorie berechnen wir aus den Empfehlungswerten pro Tag, laut folgenden Websites, jeweils geteilt durch die empfohlenen tägliche Kalorienzufuhr von 2000 Kilogramm. 
+
+https://www.nhs.uk/live-well/eat-well/what-are-reference-intakes-on-food-labels/
+
+https://www.codecheck.info/hintergrund/tagesbedarf
+
+https://www.ucsfhealth.org/education/increasing-fiber-intake
+
+Wir versuchen also die Frage zu beantworten, ob man seinen Tagesbedarf an Kalorien durch Fast-Food decken sollte, wenn man eine gesunde Ernährung anstrebt. 
+
+
+
+```{r, echo=FALSE, message=FALSE, out.width="33%"}
+
+tab <- matrix(c(data_fast_food %>% summarise(mean=mean(sugars_per_calorie)), data_rel %>% summarise(mean=mean(sugars_per_calorie)), 0.045 ,data_fast_food %>% summarise(mean=mean(fat_per_calorie)), data_rel %>% summarise(mean=mean(fat_per_calorie)), 0.035, data_fast_food %>% summarise(mean=mean(fiber_per_calorie)), data_rel %>% summarise(mean=mean(fiber_per_calorie)), 0.015 ,data_fast_food %>% summarise(mean=mean(carbs_per_calorie)), data_rel %>% summarise(mean=mean(carbs_per_calorie)),0.13, data_fast_food %>% summarise(mean=mean(protein_per_calorie)), data_rel %>% summarise(mean=mean(protein_per_calorie)), 0.035,  data_fast_food %>% summarise(mean=mean(cholest_per_calorie)),data_rel %>% summarise(mean=mean(cholest_per_calorie)), "no data", data_fast_food %>% summarise(mean=mean(sodium_per_calorie)), data_rel %>% summarise(mean=mean(sodium_per_calorie)), 1.2), ncol=3, byrow=TRUE)
+colnames(tab) <- c('Fast Food','All Food', 'Recommended')
+rownames(tab) <- c('Sugars per calorie','Fat per calorie','Fiber per calorie', 'Carbs per calorie', 'Protein per calorie', 'cholest per calorie', 'sodium per calorie' )
+tab
+
+```
+Wir können festhalten, dass Fast-Food laut unseren Datensatz zwar weniger Zucker enthält, aber auch mehr Fett und Salz, sowie weniger Protein und Ballaststoff als eine durschnittliche Mahlzeit in unserem Datensatz.  
+Insbesondere konnten wir die Abhängigkeit jener angesprochenen Variablen von der Kategoriellen Variable identifizieren, welche Mahlzeiten die Kategorie Fast Food und allgemeine Mahlzeit zuordnet. 
+
+Weiter werden bei Fast-Food Mahlzeiten die empfohlenen Werte zu Fett und Salz, um jeweils 25% und 80% überschritten. Andererseits enthält das durschnittliche Fast-Food Gericht, nur 64% der empfohlenen relativen Menge an Ballaststoffen und 76% der relativen Menge an Kohlenhydraten. Bei Zucker-, Cholesterin-, und Proteinwerten Weisen die Daten keine gesundheitliche Problematik auf. 
+
+Die ursprüngliche Frage, ob der Kalorienbedarf durch Fast-Food gedeckt werden sollte, können wir, in Hinblick auf die beiden obigen Vergleiche mit nein beantworten. 
+
+Wir sehen weiter das Fast-Food weniger Ballaststoff und Kohlenhydrate hat und daher weniger sättigend ist. Das führt dazu, dass weit mehr als der Kalorien-Bedarf gegessen wird. 
+
+### Die Fast-Food Ketten im Vergleich 
+
+Nach dem vorherigen Abschnitt unterscheidet sich ein Fast-Food Gericht und eine allgemeine Mahlzeit am signifikantesten bezüglich enthaltenen Fett, Salz, Ballastsoff und Kohlenhydraten.  
+
+Wir wollen nun für die Variablen Gramm Fett pro kcal, Milligramm Sodium pro kcal, Gramm Ballaststoff pro kcal und Gramm Kohlenhydrate pro kcal den Erwartungswert mithilfe des empirischen Mittels schätzen, wobei wir dies für die Gerichte bestimmter Fast Food Ketten einzeln machen. Ziel ist es zu Bewerten, bei welchen Fast Food Ketten das gesündeste Essen gegegessen wird. 
+```{r, out.width="50%", echo=FALSE, message = FALSE}
+
+#confidence interval
+data_fast_food %>% group_by(name)%>% summarise(mean = CI(fat_per_calorie)[2], lower = CI(fat_per_calorie)[3], upper = CI(fat_per_calorie)[1]) %>% ggplot() +
+geom_col(aes(x=name,y=mean), fill=c_1, alpha = 0.8) + geom_errorbar(aes(x=name,ymin=lower,ymax=upper),color = c_2) +
+ylab("mean fat_per_calorie")
+
+data_fast_food %>% group_by(name)%>% summarise(mean = CI(sodium_per_calorie)[2], lower = CI(sodium_per_calorie)[3], upper = CI(sodium_per_calorie)[1]) %>% ggplot() +
+geom_col(aes(x=name,y=mean), fill=c_1, alpha = 0.8) + geom_errorbar(aes(x=name,ymin=lower,ymax=upper),color = c_2)+
+ylab("mean sodium_per_calorie")
+
+data_fast_food %>% group_by(name)%>% summarise(mean = CI(fiber_per_calorie)[2], lower = CI(fiber_per_calorie)[3], upper = CI(fiber_per_calorie)[1]) %>% ggplot() +
+geom_col(aes(x=name,y=mean), fill=c_1, alpha = 0.8) + geom_errorbar(aes(x=name,ymin=lower,ymax=upper),color = c_2)+
+ylab("mean fiber_per_calorie")
+
+data_fast_food %>% group_by(name)%>% summarise(mean = CI(carbs_per_calorie)[2], lower = CI(carbs_per_calorie)[3], upper = CI(carbs_per_calorie)[1]) %>% ggplot() +
+geom_col(aes(x=name,y=mean), fill=c_1, alpha = 0.8) + geom_errorbar(aes(x=name,ymin=lower,ymax=upper),color = c_2)+
+ylab("mean carbs_per_calorie")
+
+```
+Hierbei zeichen wir 95%-Konfidenzintervalle für den Erwartungswert, berechnet wie in Teil 3 beschrieben. 
+
+
+Nur bei Subway überschreiten die durchschnittlichen Fett pro Kalorien Werte nicht den empfohlenen Wert. Alle anderen Fast Food Ketten liegen mehr als 29% über diesem Wert. 
+
+Kfc, Taco Bell und Subway überscheiten die empfohlenen Werte an Miligramm Sodium pro Kalorie um mehr als das doppelte. Bei den übrigen Fast Food Ketten wird dieser Wert, um mehr als 50% überschritten. 
+
+Insgesamt lässt sich zwar auf Grund von unterschiedlichen Abschneiden bezüglich verschiedener Variablen nicht sagen bei welcher Fast-Food-Kette am gesündetsten gegessen wird, aber unsere Daten sprechen dafür, dass bei KFC die ungesündesten Mahlzeiten verkauft werden. Hier sollte aber angemerkt werden, dass wir zu Kfc nur 448 Beobachtungen haben, werden es bei McDonalds beispielsweise 2527 sind. 
+
+Die berechneten 0.95 Konfidenzintervalle machen unsere Vergleiche, trotz unterschiedlicher Datenlage zu verschiedenen Fast Food Ketten, aussagekräftig. 
+
+## 4.2. Sweet tooth 
+
+Wir möchten uns mit der Frage beschäftigen, ob Frauen grundsätzlich süßer essen als Männer. Hierzu betrachten wir für jede Person in unserem Datensatz den mittleren Zuckerkonsum pro Kalorie pro Tag und möchten diese nun geschlechterspezifisch Vergleichen. 
+
+Wie schon in Abschnitt 3 dargelegt möchten wir hierzu einen Hypothesentest anwenden.
+
+```{r, error=FALSE,message=FALSE,warning=FALSE}
+t.test(data_female$mean,data_male$mean,alternative="greater",conf.level = 0.95)
+```
+
+Wir erhalten also einen Wert von p=.05306, also insbesondere ist $p>\alpha=0.05$. Damit kann die Nullhypothese, dass Frauen weniger Zucker pro Kalorie essen, nicht verworfen werden.
+
+Es ist also keine Aussage über einen Unterschied im Konsumverhalten von Männern und Frauen möglich.
+
+
+# Literatur
+
+  [1] Welch, B. L. (1947). _The generalization of "Student's" problem when several different population variances are involved_ Biometrika. 34(1–2): 28–35
+
+  [2] Zimmermann, D.W. (2004). _A note on preliminary tests of equality of variances_ British Journal of Mathematical and Statistical Psychology 57(Pt 1): 173-81
+
+  [3] Kolmogorov, A. (1933). _Sulla determinazione empirica di una lgge di distribuzione_. Inst. Ital. Attuari, Giorn. 4: 83-91
+
+
+  [4] Lehmann, E.L. (1998). _Elements of Large-Sample Theory_ Springer: 192
+ 
+
